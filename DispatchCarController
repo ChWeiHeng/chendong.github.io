@@ -1,0 +1,765 @@
+public with sharing class DispatchCarController {
+    public DispatchCarController() {}
+
+    @AuraEnabled
+    public static List<DispatchCarRowByDateWrapper> getDispatchCarData(Date workStartDate ){
+
+        List<DispatchCarRowByDateWrapper> finalReurnManByDateWrappers = new List<DispatchCarRowByDateWrapper>();
+        List<DispatchCarRowWrapper> finalReurnManWrappers = new List<DispatchCarRowWrapper>();
+        try {
+
+            System.Debug('$workStartDate before'+workStartDate);
+            workStartDate = Date.newInstance(workStartDate.year(), workStartDate.month(), workStartDate.day());
+            System.Debug('$workStartDate after'+workStartDate);
+
+            Date workEndData = workStartDate.addDays(13);
+
+              // 休暇/休暇申請 HolidayApplication__c 
+              List<HolidayApplication__c> holidayApplications = [
+                SELECT Id, Name, Date__c, Member__c, Member__r.Name, IsFixed__c FROM HolidayApplication__c 
+                WHERE IsFixed__c = true AND Date__c >=: workStartDate AND Date__c <=: workEndData ORDER BY Date__c ASC];
+                System.debug('holidayApplication size ***   ' + workStartDate);
+            if (holidayApplications != null && holidayApplications.size() > 0) {
+                for (HolidayApplication__c holidayApplication : holidayApplications) {
+                    System.debug('holidayApplication  ***   ' + holidayApplication.Member__r.Name);
+                }
+
+                System.debug('holidayApplication size ***   ' + workStartDate);
+                // System.debug('holidayApplication valeu  ***   ' + JSON.serialize(holidayApplication));
+            }
+
+
+            List<DispatchCarRowWrapper> carAllManWrappers = new List<DispatchCarRowWrapper>();
+
+            List<CarMaster__c> carMaste = [ 
+                SELECT Id,Name,Number__c,Image__c,Sort__c,
+                (SELECT Id,Name,MainMember__r.Id,MainMember__r.Name FROM CarRepPersons__r) 
+                FROM CarMaster__c ORDER BY Sort__c ASC
+            ];
+
+            if (carMaste != null && carMaste.size() > 0) {
+                String sObjectAPINAme = 'WorkingDate__c';
+                List<RecordType> recordTypes = [ SELECT Id, DeveloperName, Name FROM RecordType WHERE SobjectType=:sObjectAPINAme ];
+                for (CarMaster__c item : carMaste) {
+                    DispatchCarRowWrapper carAllManWrapper = new DispatchCarRowWrapper();
+                    
+                    List<CarDriverInfomationRowWrapper> carDriInfoWrappers = new List<CarDriverInfomationRowWrapper>();
+                    carAllManWrapper.Car_Id = item.Id;
+                    carAllManWrapper.Car_Name = item.Name;
+                    carAllManWrapper.Car_Image = item.Image__c;
+                    carAllManWrapper.Car_No_With_Type = item.Number__c;
+                    carAllManWrapper.Project_hasFirst = false;
+                    carAllManWrapper.Project_hasSecond = false;
+                    carAllManWrapper.Project_hasThird = false;
+                    carAllManWrapper.Project_hasFourth = false;
+                    carAllManWrapper.Project_noWorkingDates = false;
+
+                    for (CarRepPerson__c carRepPersons : item.CarRepPersons__r) {
+                        carAllManWrapper.Car_Rep_Person_Id = carRepPersons.Id;
+                        CarDriverInfomationRowWrapper carDriInfoWrapper = new CarDriverInfomationRowWrapper();
+                        carDriInfoWrapper.Car_Driver_Id = carRepPersons.MainMember__r.Id;
+                        carDriInfoWrapper.Car_Driver_Name = carRepPersons.MainMember__r.Name;
+                        carDriInfoWrappers.add(carDriInfoWrapper);
+                    }
+                    carAllManWrapper.Car_Drivers = carDriInfoWrappers;
+                    List<RecordTypeRowWrapper> recordTypeInfos = new List<RecordTypeRowWrapper>();
+                    for(RecordType rt : recordTypes) {
+                        RecordTypeRowWrapper recordTypeInfo = new RecordTypeRowWrapper();
+                        recordTypeInfo.RecordType_Name = rt.Name;
+                        recordTypeInfos.add(recordTypeInfo);
+                    }
+                    carAllManWrapper.Project_RecordTypes = recordTypeInfos;
+                    carAllManWrappers.add(carAllManWrapper);
+                }
+
+                List<DispatchCarRowWrapper> addProDateWrappers = new List<DispatchCarRowWrapper>();
+                for (DispatchCarRowWrapper carAllManItem : carAllManWrappers) {
+                    for (Integer i = 0; i < 14; i++) {
+                        DispatchCarRowWrapper newItem = new DispatchCarRowWrapper();
+                        newItem.Car_Id = carAllManItem.Car_Id;
+                        newItem.Car_Name = carAllManItem.Car_Name;
+                        newItem.Car_Image = carAllManItem.Car_Image;
+                        newItem.Car_No_With_Type = carAllManItem.Car_No_With_Type;
+                        newItem.Car_Rep_Person_Id = carAllManItem.Car_Rep_Person_Id;
+
+                        newItem.Project_hasFirst = carAllManItem.Project_hasFirst;
+                        newItem.Project_hasSecond = carAllManItem.Project_hasFirst;
+                        newItem.Project_hasThird = carAllManItem.Project_hasFirst;
+                        newItem.Project_hasFourth = carAllManItem.Project_hasFirst;
+                        newItem.Project_noWorkingDates = carAllManItem.Project_noWorkingDates;
+
+                        newItem.Car_Drivers = carAllManItem.Car_Drivers;
+                        newItem.Project_RecordTypes = carAllManItem.Project_RecordTypes;
+                        newItem.Project_Date = workStartDate.addDays(i);
+                        addProDateWrappers.add(newItem);
+                        // System.debug('$$$$$$ carAllManWrappers: ' + JSON.serialize(carAllManWrappers));
+                    }
+                }
+
+              
+
+                List<WorkingDate__c> workingDates = [ 
+                    SELECT Id, Name,CompanyDepartureTime__c,WorkingStartTime__c, Project__c, Project__r.Id, Project__r.Name, WorkingDate__c, RecordType.Name,Project__r.Address__c,
+                    Project__r.AccountName__c,Project__r.SalesRep__c,
+                        (
+                            SELECT Id, Name, CarRepPerson__c, CarRepPerson__r.Car__r.Id,
+                                CarRepPerson__r.Car__r.Name
+                            FROM DispatchCars__r
+                        )
+                    FROM WorkingDate__c 
+                    WHERE WorkingDate__c >=: workStartDate AND WorkingDate__c <=: workEndData
+                ];
+
+                if (workingDates != null && workingDates.size() > 0) {
+                    List<ProjectWorkingDateTemporyWrapper> projectWorkingDates = new List<ProjectWorkingDateTemporyWrapper>();
+                    Map<String,ProjectWorkingDateTemporyWrapper> projectWorkingDatesMap = new Map<String,ProjectWorkingDateTemporyWrapper>();
+                    for (WorkingDate__c item : workingDates) {
+                        for (DispatchCar__c disCar : item.DispatchCars__r) {
+                            // 作業日*1 => 配車*N
+                            ProjectWorkingDateTemporyWrapper projectWorkingDate = new ProjectWorkingDateTemporyWrapper();
+
+                            projectWorkingDate.Working_Date_Id = item.Id;
+                            projectWorkingDate.Working_Date = item.WorkingDate__c;
+                            
+                            projectWorkingDate.Working_CompanyDepartureTimeFirst = getStrValue(item.CompanyDepartureTime__c);
+                            projectWorkingDate.Working_CompanyDepartureTimeSecond = getStrValue(item.CompanyDepartureTime__c);
+                          
+                            projectWorkingDate.Working_StartTimeFirst = getStrValue(item.WorkingStartTime__c);
+                            projectWorkingDate.Working_StartTimeSecond = getStrValue(item.WorkingStartTime__c);
+                            projectWorkingDate.Project_Id = item.Project__c;
+                            projectWorkingDate.Project_Name = item.Project__r.Name;
+                            projectWorkingDate.Project_Address = item.Project__r.Address__c;
+                            projectWorkingDate.Project_AccountName = item.Project__r.AccountName__c;
+                            projectWorkingDate.Project_SalesRep = item.Project__r.SalesRep__c;
+                            projectWorkingDate.Project_RecordType = item.RecordType.Name;
+                            projectWorkingDate.Project_Unique_Key = item.RecordType.Name + '_' + disCar.CarRepPerson__r.Car__r.Name + '_' + (item.WorkingDate__c.year() + '-' + item.WorkingDate__c.month() + '-' + item.WorkingDate__c.day());
+
+                            projectWorkingDate.Project_IsFirst = false;
+                            projectWorkingDate.Project_IsSecond = false;
+                            projectWorkingDate.Project_IsThird = false;
+                            projectWorkingDate.Project_IsFourth = false;
+
+                            projectWorkingDate.Project_hasFirst = false;
+                            projectWorkingDate.Project_hasSecond = false;
+                            projectWorkingDate.Project_hasThird = false;
+                            projectWorkingDate.Project_hasFourth = false;
+                            if(projectWorkingDate.Project_RecordType=='1件目'){
+                                projectWorkingDate.Project_IsFirst = true;
+                            }
+                            if(projectWorkingDate.Project_RecordType=='2件目'){
+                                projectWorkingDate.Project_IsSecond  = true;
+                            }
+
+                            if(projectWorkingDate.Project_RecordType=='3件目'){
+                                projectWorkingDate.Project_IsThird  = true;
+                            }
+
+                            if(projectWorkingDate.Project_RecordType=='夜勤'){
+                                projectWorkingDate.Project_IsFourth  = true;
+                            } 
+                            projectWorkingDate.Project_Car_Id = disCar.CarRepPerson__r.Car__r.Id;
+                            projectWorkingDate.Project_Car_Name = disCar.CarRepPerson__r.Car__r.Name;
+                            projectWorkingDate.Project_CarRepPerson = disCar.CarRepPerson__c;
+                            // System.debug('***   DispatchCar  : ' + disCar.Id);
+                            String uniqueKey = projectWorkingDate.Project_Car_Id + '_' + projectWorkingDate.Project_RecordType + '_' + (projectWorkingDate.Working_Date.year() + '-' + projectWorkingDate.Working_Date.month() + '-' + projectWorkingDate.Working_Date.day());
+                            projectWorkingDates.add(projectWorkingDate);
+                            projectWorkingDatesMap.put(uniqueKey, projectWorkingDate);
+                        }
+                    } 
+                    // System.debug('$$$$$$ projectWorkingDatesMap: ' + JSON.serialize(projectWorkingDatesMap));
+                    for (DispatchCarRowWrapper dispatchCar : addProDateWrappers) {
+                        DispatchCarRowWrapper finalDisCar = new DispatchCarRowWrapper();
+                        finalDisCar.Car_Id = dispatchCar.Car_Id;
+                        finalDisCar.Car_Name = dispatchCar.Car_Name;
+                        finalDisCar.Car_Image = dispatchCar.Car_Image;
+                        finalDisCar.Car_No_With_Type = dispatchCar.Car_No_With_Type;
+
+                        finalDisCar.Project_Date = dispatchCar.Project_Date;
+                        finalDisCar.Car_Drivers = dispatchCar.Car_Drivers;
+                        finalDisCar.Project_RecordTypes = dispatchCar.Project_RecordTypes;
+                        finalDisCar.Car_Rep_Person_Id = dispatchCar.Car_Rep_Person_Id;
+
+                        finalDisCar.Project_hasFirst = dispatchCar.Project_hasFirst;
+                        finalDisCar.Project_hasSecond = dispatchCar.Project_hasFirst;
+                        finalDisCar.Project_hasThird = dispatchCar.Project_hasFirst;
+                        finalDisCar.Project_hasFourth = dispatchCar.Project_hasFirst;
+                        finalDisCar.Project_noWorkingDates = dispatchCar.Project_noWorkingDates;
+
+                        List<ProjectWorkingDateRowWrapper> projectWorkingDateRows = new List<ProjectWorkingDateRowWrapper>();
+                        for (RecordTypeRowWrapper rec : finalDisCar.Project_RecordTypes) {
+                            String uniqueKey = dispatchCar.Car_Id + '_' + rec.RecordType_Name + '_' + (dispatchCar.Project_Date.year() + '-' + dispatchCar.Project_Date.month() + '-' + dispatchCar.Project_Date.day());          
+                            if (projectWorkingDatesMap.get(uniqueKey) != null) {
+                                ProjectWorkingDateTemporyWrapper tempory = projectWorkingDatesMap.get(uniqueKey);
+                                ProjectWorkingDateRowWrapper projectWorkingDateRow = new ProjectWorkingDateRowWrapper();
+    
+                                projectWorkingDateRow.Project_Car_Id = tempory.Project_Car_Id;
+                                projectWorkingDateRow.Project_Car_Name = tempory.Project_Car_Name;
+                                projectWorkingDateRow.Working_Date_Id = tempory.Working_Date_Id;
+                                projectWorkingDateRow.Working_CompanyDepartureTimeFirst = tempory.Working_CompanyDepartureTimeFirst;
+                                projectWorkingDateRow.Working_CompanyDepartureTimeSecond = tempory.Working_CompanyDepartureTimeSecond;
+                                projectWorkingDateRow.Working_StartTimeFirst = tempory.Working_StartTimeFirst;
+                                projectWorkingDateRow.Working_StartTimeSecond = tempory.Working_StartTimeSecond;
+                                projectWorkingDateRow.Project_Date = tempory.Working_Date;
+                                projectWorkingDateRow.Project_Id = tempory.Project_Id;
+    
+                                projectWorkingDateRow.Project_Name = tempory.Project_Name;
+                                projectWorkingDateRow.Project_Address = tempory.Project_Address;
+                                projectWorkingDateRow.Project_AccountName = tempory.Project_AccountName;
+                                projectWorkingDateRow.Project_SalesRep = tempory.Project_SalesRep;
+                                projectWorkingDateRow.Project_RecordType = tempory.Project_RecordType;
+                                projectWorkingDateRow.Project_Unique_Key = tempory.Project_Unique_Key;
+
+                                projectWorkingDateRow.Project_IsFirst = tempory.Project_IsFirst;
+                                projectWorkingDateRow.Project_IsSecond = tempory.Project_IsSecond;
+                                projectWorkingDateRow.Project_IsThird = tempory.Project_IsThird;
+                                projectWorkingDateRow.Project_IsFourth = tempory.Project_IsFourth;
+
+                                projectWorkingDateRow.Project_hasFirst = tempory.Project_hasFirst;
+                                projectWorkingDateRow.Project_hasSecond = tempory.Project_hasSecond;
+                                projectWorkingDateRow.Project_hasThird = tempory.Project_hasThird;
+                                projectWorkingDateRow.Project_hasFourth = tempory.Project_hasFourth;
+
+                                projectWorkingDateRows.add(projectWorkingDateRow);
+                            } else {
+                                ProjectWorkingDateRowWrapper noProjectWorkingDateRow = createProjectWorkingDateRow();
+                                noProjectWorkingDateRow.Project_Car_Id = finalDisCar.Car_Id;
+                                noProjectWorkingDateRow.Project_Car_Name = finalDisCar.Car_Name;
+                                noProjectWorkingDateRow.Project_Unique_Key = rec.RecordType_Name + '_' + finalDisCar.Car_Name + '_' + (finalDisCar.Project_Date.year() + '-' + finalDisCar.Project_Date.month() + '-' + finalDisCar.Project_Date.day());
+                                projectWorkingDateRows.add(noProjectWorkingDateRow);
+                            }
+                        }
+                        // dispatchCar.Project_WorkingDates = projectWorkingDateRows;
+                        finalDisCar.Project_WorkingDates = projectWorkingDateRows;
+                        finalReurnManWrappers.add(finalDisCar);
+                    }
+                    // System.debug('$$$$$$ finalReurnManWrappers: ' + JSON.serialize(finalReurnManWrappers));
+                } else {
+                    System.debug('$$$$$$ Not found match Workingdate Data ');
+
+                    for (DispatchCarRowWrapper dispatchCar : addProDateWrappers) {
+                        DispatchCarRowWrapper finalDisCar = new DispatchCarRowWrapper();
+                        finalDisCar.Car_Id = dispatchCar.Car_Id;
+                        finalDisCar.Car_Name = dispatchCar.Car_Name;
+                        finalDisCar.Car_Image = dispatchCar.Car_Image;
+                        finalDisCar.Car_No_With_Type = dispatchCar.Car_No_With_Type;
+                        finalDisCar.Car_Rep_Person_Id = dispatchCar.Car_Rep_Person_Id;
+
+                        finalDisCar.Project_Date = dispatchCar.Project_Date;
+                        finalDisCar.Car_Drivers = dispatchCar.Car_Drivers;
+                        finalDisCar.Project_RecordTypes = dispatchCar.Project_RecordTypes;
+
+                        finalDisCar.Project_hasFirst = dispatchCar.Project_hasFirst;
+                        finalDisCar.Project_hasSecond = dispatchCar.Project_hasSecond;
+                        finalDisCar.Project_hasThird = dispatchCar.Project_hasThird;
+                        finalDisCar.Project_hasFourth = dispatchCar.Project_hasFourth;
+                        finalDisCar.Project_noWorkingDates = dispatchCar.Project_noWorkingDates;
+
+                        List<ProjectWorkingDateRowWrapper> projectWorkingDateRows = new List<ProjectWorkingDateRowWrapper>();
+
+                        for (RecordTypeRowWrapper rec : finalDisCar.Project_RecordTypes) {
+                            ProjectWorkingDateRowWrapper projectWorkingDateRow = createProjectWorkingDateRow();
+                            projectWorkingDateRow.Project_Car_Id = finalDisCar.Car_Id;
+                            projectWorkingDateRow.Project_Car_Name = finalDisCar.Car_Name;
+                            projectWorkingDateRow.Project_Unique_Key = rec.RecordType_Name + '_' + finalDisCar.Car_Name + '_' + (finalDisCar.Project_Date.year() + '-' + finalDisCar.Project_Date.month() + '-' + finalDisCar.Project_Date.day());
+                            projectWorkingDateRows.add(projectWorkingDateRow);
+                        }
+                        finalDisCar.Project_WorkingDates = projectWorkingDateRows;
+                        finalReurnManWrappers.add(finalDisCar);
+                    }
+                }
+                
+                Map<String,List<DispatchCarRowWrapper>> finalDisCarColMap = new Map<String,List<DispatchCarRowWrapper>>();
+                for (DispatchCarRowWrapper disItem : finalReurnManWrappers) {
+                    String projectDateStr = disItem.Project_Date.year() + '-' + disItem.Project_Date.month() + '-' + disItem.Project_Date.day();
+                    // System.debug('$$$$$$ projectDateStr: ' + projectDateStr);
+                    if (finalDisCarColMap.get(projectDateStr) != null) {
+                        List<DispatchCarRowWrapper> seDiscarColLists = finalDisCarColMap.get(projectDateStr);
+                        seDiscarColLists.add(disItem);
+                        finalDisCarColMap.put(projectDateStr, seDiscarColLists);
+                    } else {
+                        List<DispatchCarRowWrapper> frDiscarColLists = new List<DispatchCarRowWrapper>();
+                        frDiscarColLists.add(disItem);
+                        finalDisCarColMap.put(projectDateStr, frDiscarColLists);
+                    }
+                }
+
+                for (String key : finalDisCarColMap.keySet()) {
+                    DispatchCarRowByDateWrapper dispatchCarColByDate = new DispatchCarRowByDateWrapper();
+                    dispatchCarColByDate.Project_Working_Date = key;
+                    dispatchCarColByDate.DispatchCarRowDatas = finalDisCarColMap.get(Key);
+                    finalReurnManByDateWrappers.add(dispatchCarColByDate);
+                }
+
+                // System.debug('$$$$$$ finalReurnManByDateWrappers: ' + JSON.serialize(finalReurnManByDateWrappers));
+            }
+        } catch (Exception e) {
+            System.debug('$$$$$$ e.getMessage: ' + e.getMessage());
+            throw new AuraHandledException(e.getMessage());
+        }
+
+        return finalReurnManByDateWrappers;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static List<DispatchCarRowWrapper> getDispatchCarHeaderData(){
+        List<DispatchCarRowWrapper> carAllManWrappers = new List<DispatchCarRowWrapper>();
+        try {
+            List<CarMaster__c> carMaste = [ 
+                SELECT Id,Name,Number__c,Image__c,Sort__c,
+                (SELECT Id,Name,MainMember__r.Id,MainMember__r.Name,SubMember__r.Id,SubMember__r.Name FROM CarRepPersons__r) 
+                FROM CarMaster__c ORDER BY Sort__c ASC
+            ];
+
+            if (carMaste != null && carMaste.size() > 0) {
+               
+                for (CarMaster__c item : carMaste) {
+                    List<CarDriverInfomationRowWrapper> carDriInfoWrappers = new List<CarDriverInfomationRowWrapper>();
+                    DispatchCarRowWrapper carAllManWrapper = new DispatchCarRowWrapper();
+                    carAllManWrapper.Car_Name = item.Name;
+                    carAllManWrapper.Car_Image = item.Image__c;
+                    carAllManWrapper.Car_No_With_Type = item.Number__c;
+                    for (CarRepPerson__c carRepPerson : item.CarRepPersons__r) {
+
+                        CarDriverInfomationRowWrapper carDriInfoWrapper = new CarDriverInfomationRowWrapper();
+                            carDriInfoWrapper.Car_Driver_Id = carRepPerson.MainMember__r.Id;
+                            carDriInfoWrapper.Car_Driver_Name = carRepPerson.MainMember__r.Name;
+                            carDriInfoWrappers.add(carDriInfoWrapper);
+
+                            // if (carRepPerson.SubMember__r.Id != null) {
+                                
+                            // }
+                            // System.debug('$$$$$$ carDriInfoWrappers : ' + JSON.serialize(carDriInfoWrappers));
+                            CarDriverInfomationRowWrapper carDriInfoWrapper1 = new CarDriverInfomationRowWrapper();
+                            carDriInfoWrapper1.Car_Driver_Id = carRepPerson.SubMember__r.Id;
+                            carDriInfoWrapper1.Car_Driver_Name = carRepPerson.SubMember__r.Name;
+                            carDriInfoWrappers.add(carDriInfoWrapper1);
+                        
+                     
+                    }
+                    System.debug('$$$$$$ carDriInfoWrappers : ' + JSON.serialize(carDriInfoWrappers));
+                    carAllManWrapper.Car_Drivers = carDriInfoWrappers;
+                    carAllManWrappers.add(carAllManWrapper);
+                }
+            }
+        } catch (Exception e) {
+            System.debug('$$$$$$ e.getMessage: ' + e.getMessage());
+            throw new AuraHandledException(e.getMessage());
+        }
+
+        System.debug('$$$$$$ carAllManWrappers: ' + JSON.serialize(carAllManWrappers));
+        return carAllManWrappers;
+    }
+
+    public static ProjectWorkingDateRowWrapper createProjectWorkingDateRow() {
+        ProjectWorkingDateRowWrapper projectWorkingDateRow = new ProjectWorkingDateRowWrapper();
+        projectWorkingDateRow.Working_Date_Id = null;
+        projectWorkingDateRow.Working_CompanyDepartureTimeSecond = null;
+        projectWorkingDateRow.Working_CompanyDepartureTimeFirst = null;
+        projectWorkingDateRow.Working_StartTimeFirst = null;
+        projectWorkingDateRow.Working_StartTimeSecond = null;
+        projectWorkingDateRow.Project_Date = null;
+
+        projectWorkingDateRow.Project_Name = null;
+        projectWorkingDateRow.Project_Address = null;
+        projectWorkingDateRow.Project_AccountName = null;
+        projectWorkingDateRow.Project_SalesRep = null;
+        projectWorkingDateRow.Project_RecordType = null;
+        // projectWorkingDateRow.Project_Unique_Key = null;
+
+        projectWorkingDateRow.Project_IsFirst = FALSE;
+        projectWorkingDateRow.Project_IsSecond = FALSE;
+        projectWorkingDateRow.Project_IsThird = FALSE;
+        projectWorkingDateRow.Project_IsFourth = FALSE;
+
+        projectWorkingDateRow.Project_hasFirst = FALSE;
+        projectWorkingDateRow.Project_hasSecond = FALSE;
+        projectWorkingDateRow.Project_hasThird = FALSE;
+        projectWorkingDateRow.Project_hasFourth = FALSE;
+        return projectWorkingDateRow;
+    }
+
+   @AuraEnabled
+    public static Boolean updateSpecifiedWorkingdateVal(String recieveTime, String paramId, Boolean fieldCheck){
+        Boolean doStatus = true;
+        if (String.isNotBlank(recieveTime) && String.isNotBlank(paramId)) {
+            try {
+                String[] strTimeSplit = recieveTime.split(':');
+                Time updTime = Time.newInstance( Integer.valueOf(strTimeSplit[0]), Integer.valueOf(strTimeSplit[1]), 0, 0);
+
+                List<WorkingDate__c> workingDates = [ 
+                    SELECT 
+                        Id, Name, RecordTypeId, Project__c, CompanyDepartureTime__c, WorkingStartTime__c, WorkingDate__c 
+                    FROM WorkingDate__c 
+                    WHERE Id =: paramId LIMIT 1
+                ];
+
+                if (workingDates != null && workingDates.size() > 0) {
+                    for (WorkingDate__c updItem : workingDates) {
+                        if (fieldCheck) {
+                            updItem.CompanyDepartureTime__c = updTime;
+                        } else {
+                            updItem.WorkingStartTime__c = updTime;
+                        }
+                    }
+
+                    update workingDates;
+                }
+            } catch (Exception e) {
+                System.debug('$$$$$$ Update Workingdate Data Error Message is : ' + e.getMessage());
+                doStatus = false;
+            }
+        } else {
+            doStatus = false; 
+        }
+        return doStatus;
+    }
+
+    @AuraEnabled
+    public static List<RecordsData> fetchRecords(String objectName, String filterField, String searchString, String value) {
+        try {
+            List<RecordsData> recordsDataList = new List<RecordsData>();
+            String query = 'SELECT Id, ' + filterField + ' FROM '+objectName;
+            if(String.isNotBlank(value)) {
+                query += ' WHERE Id = \''+ value + '\' LIMIT 49999';
+            } else {
+                query += ' WHERE '+filterField+
+                		' LIKE ' + '\'' + String.escapeSingleQuotes(searchString.trim()) + '%\' LIMIT 49999';
+            }
+	        for(SObject s : Database.query(query)) {
+	            recordsDataList.add( new RecordsData((String)s.get(filterField), (String)s.get('id')) );
+	        }
+            return recordsDataList;
+	    } catch (Exception err) {
+	    	if ( String.isNotBlank( err.getMessage() ) && err.getMessage().contains( 'error:' ) ) {
+                throw new AuraHandledException(err.getMessage().split('error:')[1].split(':')[0] + '.');
+            } else {
+                throw new AuraHandledException(err.getMessage());
+            }
+	    }
+    }
+
+    // fetch return wrapper
+    public class RecordsData {
+        @AuraEnabled public String label;
+        @AuraEnabled public String value;
+        public RecordsData(String label, String value) {
+            this.label = label;
+            this.value = value;
+        }
+    }
+
+    public static String getStrValue(Time val) {
+         String paramStr;
+          if (val == null) {
+            paramStr = '';
+          } else {
+            if (val.hour() < 10 && val.minute() < 10) {
+              paramStr = '0' + val.hour() + ':0' + val.minute();
+            } else if (val.hour() < 10) {
+              paramStr = '0' + val.hour() + ':' + val.minute();
+            } else if (val.minute() < 10) {
+              paramStr = val.hour() + ':0' + val.minute();
+            } else {
+              paramStr = String.valueOf(val.hour()) + ':' + String.valueOf(val.minute());
+            }
+          }
+          return paramStr;
+    }
+
+    @AuraEnabled
+    public static ProjectWorkingDateTemporyWrapper createSpecifiedWorkingdateVal(String paramStr){
+        ProjectWorkingDateTemporyWrapper projectWorkingDate = new ProjectWorkingDateTemporyWrapper();
+        if (String.isNotBlank(paramStr)) {
+            try {
+                Map<String, Object> persistedMap = (Map<String, Object>) JSON.deserializeUntyped(paramStr);
+                String carId = String.valueOf(persistedMap.get('CarId'));
+                Date workingDate = Date.valueOf( String.valueOf(persistedMap.get('WorkingDate')));
+                String recordTypeName = String.valueOf(persistedMap.get('RecordType'));
+                String projectId = String.valueOf(persistedMap.get('ProjectId'));
+                String carRepPersonId = String.valueOf(persistedMap.get('CarRepPersonId'));
+
+                String sObjectAPINAme = 'WorkingDate__c';
+                String recId;
+                List<RecordType> recordTypes = [ SELECT Id, DeveloperName, Name FROM RecordType WHERE SobjectType=:sObjectAPINAme AND Name=: recordTypeName LIMIT 1 ];
+                for (RecordType rec : recordTypes) {
+                    recId = rec.Id;
+                }
+                WorkingDate__c insWorkingDate = new WorkingDate__c();
+                insWorkingDate.Project__c = projectId;
+                insWorkingDate.WorkingDate__c = workingDate;
+                insWorkingDate.RecordTypeId = recId;
+                insert insWorkingDate;
+
+                DispatchCar__c insDispatchCar = new DispatchCar__c();
+                insDispatchCar.CarRepPerson__c = carRepPersonId;
+                insDispatchCar.WorkingDate__c = insWorkingDate.Id;
+                insert insDispatchCar;
+
+                List<WorkingDate__c> workingDates = [ 
+                    SELECT Id, Name,CompanyDepartureTime__c,WorkingStartTime__c, Project__c, Project__r.Id, Project__r.Name, WorkingDate__c, RecordType.Name,Project__r.Address__c,
+                    Project__r.AccountName__c,Project__r.SalesRep__c,
+                        (
+                            SELECT Id, Name, CarRepPerson__c, CarRepPerson__r.Car__r.Id,
+                                CarRepPerson__r.Car__r.Name
+                            FROM DispatchCars__r
+                        )
+                    FROM WorkingDate__c 
+                    WHERE Id =: insWorkingDate.Id
+                ];
+                System.debug('$$$$$$ workingDates: ' + workingDates);
+
+                for (WorkingDate__c item : workingDates) {
+                    for (DispatchCar__c disCar : item.DispatchCars__r) {
+                        projectWorkingDate.Working_Date_Id = item.Id;
+                        projectWorkingDate.Working_Date = item.WorkingDate__c;
+                        projectWorkingDate.Working_CompanyDepartureTimeFirst = getStrValue(item.CompanyDepartureTime__c);
+                        projectWorkingDate.Working_CompanyDepartureTimeSecond = getStrValue(item.CompanyDepartureTime__c);
+                      
+                        projectWorkingDate.Working_StartTimeFirst = getStrValue(item.WorkingStartTime__c);
+                        projectWorkingDate.Working_StartTimeSecond = getStrValue(item.WorkingStartTime__c);
+                        projectWorkingDate.Project_Id = item.Project__c;
+                        projectWorkingDate.Project_Name = item.Project__r.Name;
+                        projectWorkingDate.Project_Address = item.Project__r.Address__c;
+                        projectWorkingDate.Project_AccountName = item.Project__r.AccountName__c;
+                        projectWorkingDate.Project_SalesRep = item.Project__r.SalesRep__c;
+                        projectWorkingDate.Project_RecordType = item.RecordType.Name;
+                        projectWorkingDate.Project_Unique_Key = item.RecordType.Name + '_' + disCar.CarRepPerson__r.Car__r.Name + '_' + (item.WorkingDate__c.year() + '-' + item.WorkingDate__c.month() + '-' + item.WorkingDate__c.day());
+
+                        projectWorkingDate.Project_IsFirst = false;
+                        projectWorkingDate.Project_IsSecond = false;
+                        projectWorkingDate.Project_IsThird = false;
+                        projectWorkingDate.Project_IsFourth = false;
+
+                        projectWorkingDate.Project_hasFirst = false;
+                        projectWorkingDate.Project_hasSecond = false;
+                        projectWorkingDate.Project_hasThird = false;
+                        projectWorkingDate.Project_hasFourth = false;
+                        if(projectWorkingDate.Project_RecordType=='1件目'){
+                            projectWorkingDate.Project_IsFirst = true;
+                            projectWorkingDate.Project_hasFirst = true;
+                        }
+                        if(projectWorkingDate.Project_RecordType=='2件目'){
+                            projectWorkingDate.Project_IsSecond  = true;
+                            projectWorkingDate.Project_hasSecond = true;
+                        }
+
+                        if(projectWorkingDate.Project_RecordType=='3件目'){
+                            projectWorkingDate.Project_IsThird  = true;
+                            projectWorkingDate.Project_hasThird = true;
+                        }
+
+                        if(projectWorkingDate.Project_RecordType=='夜勤'){
+                            projectWorkingDate.Project_IsFourth  = true;
+                            projectWorkingDate.Project_hasFourth = true;
+                        } 
+                        
+                        projectWorkingDate.Project_Car_Id = disCar.CarRepPerson__r.Car__r.Id;
+                        projectWorkingDate.Project_Car_Name = disCar.CarRepPerson__r.Car__r.Name;
+                        projectWorkingDate.Project_CarRepPerson = disCar.CarRepPerson__c;
+                    }
+                } 
+                System.debug('$$$$$$ projectWorkingDate: ' + projectWorkingDate);
+                
+            } catch (Exception e) {
+                System.debug('$$$$$$ Create Workingdate Data Error Message is : ' + e.getMessage());
+            }
+        } else {
+            System.debug('$$$$$$ Create Workingdate Data Error, because paramStr has no data ');
+        }
+        return projectWorkingDate;
+    }
+
+    // Sort by date
+    public class DispatchCarRowByDateWrapper{
+        @AuraEnabled
+        public String Project_Working_Date {get; set;}
+        @AuraEnabled
+        public List<DispatchCarRowWrapper> DispatchCarRowDatas{get; set;}
+    }
+
+    // Car Colum
+    public class DispatchCarRowWrapper{
+        @AuraEnabled
+        public String Car_Id {get; set;}
+        @AuraEnabled
+        public String Car_Name {get; set;}
+        @AuraEnabled
+        public String Car_Image {get; set;}
+        @AuraEnabled
+        public String Car_No_With_Type {get; set;}
+        @AuraEnabled
+        public List<CarDriverInfomationRowWrapper> Car_Drivers {get; set;}
+        @AuraEnabled
+        public Decimal Car_Master_No {get; set;}
+        @AuraEnabled
+        public String Car_Rep_Person_Id {get; set;}
+
+        @AuraEnabled
+        public Date Project_Date {get; set;}
+        @AuraEnabled
+        public List<ProjectWorkingDateRowWrapper> Project_WorkingDates {get; set;}
+
+        @AuraEnabled
+        public List<RecordTypeRowWrapper> Project_RecordTypes {get; set;}
+
+        @AuraEnabled
+        public List<MainAndSubMemberList> Main_SubMember {get; set;}
+
+        @AuraEnabled
+        public Boolean Project_hasFirst {get; set;}
+        @AuraEnabled
+        public Boolean Project_hasSecond {get; set;}
+        @AuraEnabled
+        public Boolean Project_hasThird {get; set;}
+        @AuraEnabled
+        public Boolean Project_hasFourth {get; set;}
+        @AuraEnabled
+        public Boolean Project_noWorkingDates {get; set;}
+    }
+
+    public class MainAndSubMemberList{
+        @AuraEnabled
+        public String Main_Member {get; set;}
+        @AuraEnabled
+        public String Sub_Member {get; set;}
+    }
+
+    public class RecordTypeRowWrapper{
+        @AuraEnabled
+        public String RecordType_Name {get; set;}
+    }
+
+    // Car Driver Colum
+    public class CarDriverInfomationRowWrapper{
+        @AuraEnabled
+        public String Car_Driver_Id {get; set;}
+        @AuraEnabled
+        public String Car_Driver_Name {get; set;}
+    }
+
+    // Project WorkingDate Tempory
+    public class ProjectWorkingDateTemporyWrapper{
+        @AuraEnabled
+        public String Working_Date_Id {get; set;}
+        @AuraEnabled
+        public Date Working_Date {get; set;} 
+        @AuraEnabled
+        public String  Working_CompanyDepartureTimeFirst {get; set;}
+        @AuraEnabled
+        public String  Working_CompanyDepartureTimeSecond {get; set;}
+        @AuraEnabled
+        public String  Working_StartTimeFirst {get; set;}
+        @AuraEnabled
+        public String  Working_StartTimeSecond {get; set;}
+        @AuraEnabled
+        public String Project_Id {get; set;}
+        @AuraEnabled
+        public String Project_Name {get; set;}
+        @AuraEnabled
+        public String Project_Address {get; set;}
+        @AuraEnabled
+        public String Project_AccountName {get; set;}
+        @AuraEnabled
+        public String Project_SalesRep {get; set;}
+        @AuraEnabled
+        public String Project_RecordType {get; set;}
+        @AuraEnabled
+        public String Project_Car_Id {get; set;}
+        @AuraEnabled
+        public String Project_Car_Name {get; set;}
+        @AuraEnabled
+        public String Project_CarRepPerson {get; set;}
+        @AuraEnabled
+        public Boolean Project_IsFirst {get; set;}
+        @AuraEnabled
+        public Boolean Project_IsSecond {get; set;}
+        @AuraEnabled
+        public Boolean Project_IsThird {get; set;}
+        @AuraEnabled
+        public Boolean Project_IsFourth {get; set;}
+
+        @AuraEnabled
+        public Boolean Project_hasFirst {get; set;}
+        @AuraEnabled
+        public Boolean Project_hasSecond {get; set;}
+        @AuraEnabled
+        public Boolean Project_hasThird {get; set;}
+        @AuraEnabled
+        public Boolean Project_hasFourth {get; set;}
+
+        @AuraEnabled
+        public Boolean Project_IsHasData {get; set;}
+
+        @AuraEnabled
+        public String Project_Unique_Key {get; set;}
+    }
+
+    // Project WorkingDate Row
+    public class ProjectWorkingDateRowWrapper{
+        @AuraEnabled
+        public String Working_Date_Id {get; set;}
+        @AuraEnabled
+        public String  Working_CompanyDepartureTimeFirst {get; set;}
+        @AuraEnabled
+        public String  Working_CompanyDepartureTimeSecond {get; set;}
+        @AuraEnabled
+        public String  Working_StartTimeFirst {get; set;}
+        @AuraEnabled
+        public String  Working_StartTimeSecond {get; set;}
+        @AuraEnabled
+        public String Project_Id {get; set;}
+        @AuraEnabled
+        public String Project_RecordType {get; set;}
+
+        @AuraEnabled
+        public String Project_Name {get; set;}
+        @AuraEnabled
+        public String Project_Address {get; set;}
+        @AuraEnabled
+        public String Project_AccountName {get; set;}
+        @AuraEnabled
+        public String Project_SalesRep {get; set;}
+        @AuraEnabled
+        public String Project_Urbantowns_Villages {get; set;}
+        @AuraEnabled
+        public String Project_Contact_Name {get; set;}
+        @AuraEnabled
+        public String Project_Sales_Representative {get; set;}
+        @AuraEnabled
+        public String Project_Company_Dep_Worksite_Start_Date {get; set;}
+        @AuraEnabled
+        public String Project_Company_Dep_Worksite_Start_Time {get; set;}
+
+        @AuraEnabled
+        public String Project_Car_Id {get; set;}
+        @AuraEnabled
+        public String Project_Car_Name {get; set;}
+        @AuraEnabled
+        public Date Project_Date {get; set;}
+
+        @AuraEnabled
+        public Boolean Project_IsFirst {get; set;}
+        @AuraEnabled
+        public Boolean Project_IsSecond {get; set;}
+        @AuraEnabled
+        public Boolean Project_IsThird {get; set;}
+        @AuraEnabled
+        public Boolean Project_IsFourth {get; set;}
+
+        @AuraEnabled
+        public Boolean Project_hasFirst {get; set;}
+        @AuraEnabled
+        public Boolean Project_hasSecond {get; set;}
+        @AuraEnabled
+        public Boolean Project_hasThird {get; set;}
+        @AuraEnabled
+        public Boolean Project_hasFourth {get; set;}
+
+
+        @AuraEnabled
+        public Boolean Project_IsHasData {get; set;}
+
+        @AuraEnabled
+        public String Project_Unique_Key {get; set;}
+    }
+}
